@@ -14,6 +14,9 @@
 
 (def ^:private encryption-regex #"(?m)^ENC\[(.*)\]\n*$")
 
+(defn- encrypted-value [v]
+  (second (re-find encryption-regex v)))
+
 (defn- to-keypair [pem-keypair]
   (let [p (JcaPEMKeyConverter.)]
     (.setProvider p "BC")
@@ -23,8 +26,6 @@
   (let [data (CMSEnvelopedData. (.decode (Base64/getDecoder) s))
         bytes (.getContent (first (.getRecipients (.getRecipientInfos data))) (JceKeyTransEnvelopedRecipient. (.getPrivate (to-keypair keypair))))]
     (String. bytes)))
-
-(defn- encrypt [keypair s])
 
 (defn- load-pem [pem]
   (with-open [r (io/reader pem)]
@@ -38,6 +39,3 @@
 (defn decrypt-file [ejson-file & rest]
   (with-open [s (io/reader ejson-file)]
     (apply decrypt (json/parse-stream s) rest)))
-
-(defn- encrypted-value [v]
-  (second (re-find encryption-regex v)))
