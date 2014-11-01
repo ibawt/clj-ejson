@@ -3,8 +3,9 @@
             [clojure.java.io :as io])
   (:import java.security.KeyPair
            java.security.Security
-           javax.crypto.Cipher
            java.util.Base64
+           org.bouncycastle.cms.CMSEnvelopedData
+           org.bouncycastle.cms.jcajce.JceKeyTransEnvelopedRecipient
            org.bouncycastle.openssl.PEMParser
            org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter
            org.bouncycastle.jce.provider.BouncyCastleProvider))
@@ -18,25 +19,25 @@
     (.setProvider p "BC")
     (.getKeyPair p pem-keypair)))
 
-(defn- decrypt [keypair s]
-  (let [data (org.bouncycastle.cms.CMSEnvelopedData. (.decode (Base64/getDecoder) s))
-        bytes (.getContent (first (.getRecipients (.getRecipientInfos data))) (org.bouncycastle.cms.jcajce.JceKeyTransEnvelopedRecipient. (.getPrivate (to-keypair keypair))))]
-    bytes
-    ))
+(defn- decrypt-value [keypair s]
+  (let [data (CMSEnvelopedData. (.decode (Base64/getDecoder) s))
+        bytes (.getContent (first (.getRecipients (.getRecipientInfos data))) (JceKeyTransEnvelopedRecipient. (.getPrivate (to-keypair keypair))))]
+    (String. bytes)))
 
-(defn- encrypt [keypair s]
-  )
+(defn- encrypt [keypair s])
 
-(defn- load-pem [filename]
-  (with-open [reader (io/reader filename)]
-    (.readObject (PEMParser. reader))))
+(defn- load-pem [pem]
+  (with-open [r (io/reader pem)]
+    (.readObject (PEMParser. r))))
 
-(defn decrypt-file [ejson-file & options]
-  (let [data (json/parse-string (slurp ejson-file))
-        pem (load-pem (:private-key options))]
-    (reduce-kv #(assoc %1 %2 (decrypt pem (encrypted-value %3))) {} data)))
+(defn decrypt [m &{:keys [private-key]}]
+  "Decrypts the values of the map"
+  (let [pem (load-pem private-key)]
+    (reduce-kv #(assoc %1 %2 (decrypt-value pem (encrypted-value %3))) {} m)))
 
-(defn load-public-key [f])
+(defn decrypt-file [ejson-file & rest]
+  (with-open [s (io/reader ejson-file)]
+    (apply decrypt (json/parse-stream s) rest)))
 
 (defn- encrypted-value [v]
   (second (re-find encryption-regex v)))
