@@ -45,12 +45,23 @@
 (defn- key->recipient [keypair]
   (JceKeyTransEnvelopedRecipient. (.getPrivate keypair)))
 
+(defn decrypt-or-pass [r v]
+  (let [vv (encrypted-value v)]
+    (if vv
+      (decrypt-value r vv)
+      v)))
+
 (defn decrypt [m &{:keys [private-key]}]
   "Decrypts the values of the map"
-  (let [r (key->recipient (to-keypair (load-pem private-key)))]
-    (reduce-kv #(assoc %1 %2 (decrypt-value r (encrypted-value %3))) {} m)))
+  (let [r (key->recipient (to-keypair (load-pem private-key)))
+        f (fn [[k v]] (if (string? v)
+                        [k (decrypt-or-pass r v)]
+                        [k v]))]
+    (clojure.walk/postwalk (fn [x] (if (map? x) (into {} (map f x)) x)) m)))
 
 (defn decrypt-file [ejson-file & rest]
   "Decrypts with an implicit open and read"
   (with-open [s (io/reader ejson-file)]
     (apply decrypt (json/parse-stream s) rest)))
+
+(defn encrypt [m &{:keys [public-key]}])
