@@ -18,24 +18,39 @@
   (second (re-find encryption-regex v)))
 
 (defn- to-keypair [pem-keypair]
-  (let [p (JcaPEMKeyConverter.)]
-    (.setProvider p "BC")
-    (.getKeyPair p pem-keypair)))
+  (->
+   (JcaPEMKeyConverter.)
+   (.setProvider "BC")
+   (.getKeyPair pem-keypair)))
 
-(defn- decrypt-value [keypair s]
-  (let [data (CMSEnvelopedData. (.decode (Base64/getDecoder) s))
-        bytes (.getContent (first (.getRecipients (.getRecipientInfos data))) (JceKeyTransEnvelopedRecipient. (.getPrivate (to-keypair keypair))))]
-    (String. bytes)))
+(defn- string->envelope [^String s]
+  (->
+   (Base64/getDecoder)
+   (.decode s)
+   (CMSEnvelopedData.)))
+
+(defn- decrypt-value [env-recipient s]
+  (->
+   (string->envelope s)
+   (.getRecipientInfos)
+   (.getRecipients)
+   (first)
+   (.getContent env-recipient)
+   (String.)))
 
 (defn- load-pem [pem]
   (with-open [r (io/reader pem)]
     (.readObject (PEMParser. r))))
 
+(defn- key->recipient [keypair]
+  (JceKeyTransEnvelopedRecipient. (.getPrivate keypair)))
+
 (defn decrypt [m &{:keys [private-key]}]
   "Decrypts the values of the map"
-  (let [pem (load-pem private-key)]
-    (reduce-kv #(assoc %1 %2 (decrypt-value pem (encrypted-value %3))) {} m)))
+  (let [r (key->recipient (to-keypair (load-pem private-key)))]
+    (reduce-kv #(assoc %1 %2 (decrypt-value r (encrypted-value %3))) {} m)))
 
 (defn decrypt-file [ejson-file & rest]
+  "Decrypts with an implicit open and read"
   (with-open [s (io/reader ejson-file)]
     (apply decrypt (json/parse-stream s) rest)))
