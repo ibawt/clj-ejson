@@ -51,7 +51,7 @@
   "construct a recipient from the keypair"
   (JceKeyTransEnvelopedRecipient. (.getPrivate keypair)))
 
-(defn decrypt-or-pass [r v]
+(defn- decrypt-or-pass [r v]
   "decrypt v with r if v is a valid ejson value
    or return it's normal value"
   (let [vv (encrypted-value v)]
