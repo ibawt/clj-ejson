@@ -15,21 +15,25 @@
 (def ^:private encryption-regex #"(?m)^ENC\[(.*)\]\n*$")
 
 (defn- encrypted-value [v]
+  "grabs the encrypted payload from v"
   (second (re-find encryption-regex v)))
 
 (defn- to-keypair [pem-keypair]
+  "converts an openssl keypair into a jcajce"
   (->
    (JcaPEMKeyConverter.)
    (.setProvider "BC")
    (.getKeyPair pem-keypair)))
 
 (defn- string->envelope [^String s]
+  "base64 decodes s and constructs a CMSEnvelopedData around it"
   (->
    (Base64/getDecoder)
    (.decode s)
    (CMSEnvelopedData.)))
 
 (defn- decrypt-value [env-recipient s]
+  "decrypt s with env-recipient"
   (->
    (string->envelope s)
    (.getRecipientInfos)
@@ -39,13 +43,17 @@
    (String.)))
 
 (defn- load-pem [pem]
+  "read a PEMKeypair from pem"
   (with-open [r (io/reader pem)]
     (.readObject (PEMParser. r))))
 
 (defn- key->recipient [keypair]
+  "construct a recipient from the keypair"
   (JceKeyTransEnvelopedRecipient. (.getPrivate keypair)))
 
 (defn decrypt-or-pass [r v]
+  "decrypt v with r if v is a valid ejson value
+   or return it's normal value"
   (let [vv (encrypted-value v)]
     (if vv
       (decrypt-value r vv)
