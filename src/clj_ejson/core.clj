@@ -72,4 +72,21 @@
   (with-open [s (io/reader ejson-file)]
     (apply decrypt (json/parse-stream s) rest)))
 
-(defn encrypt [m &{:keys [public-key]}])
+(defn- encrypt-recipient [pem]
+  ; lol java ><
+  (let [cert (.getCertificate (.setProvider (org.bouncycastle.cert.jcajce.JcaX509CertificateConverter.) "BC") pem)]
+    (.setProvider (org.bouncycastle.cms.jcajce.JceKeyTransRecipientInfoGenerator. cert) "BC")))
+
+(defn- encrypt-value [r v]
+  (let [data (org.bouncycastle.cms.CMSProcessableByteArray. (.getBytes v))
+        ed-gen (org.bouncycastle.cms.CMSEnvelopedDataGenerator.)]
+    (.addRecipientInfoGenerator ed-gen r)
+    (.encodeToString (java.util.Base64/getEncoder ) (.getEncoded (.generate ed-gen data (.build (.setProvider (org.bouncycastle.cms.jcajce.JceCMSContentEncryptorBuilder. org.bouncycastle.cms.CMSAlgorithm/AES256_CBC) "BC"))))))
+  )
+
+(defn encrypt [m &{:keys [public-key]}]
+  (let [r (encrypt-recipient (load-pem public-key))
+        f (fn [[k v]] (if (and (string? v) (not (.startsWith k "_")) (nil? (encrypted-value v)) )
+                        [k (str "ENC[" (encrypt-value r v) "]")]
+                        [k v]))]
+    (clojure.walk/postwalk (fn [x] (if (map? x) (into {} (map f x)) x)) m)))
