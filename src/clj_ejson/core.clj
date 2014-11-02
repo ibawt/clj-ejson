@@ -1,22 +1,26 @@
 (ns clj-ejson.core
-  (:require [cheshire.core :as json]
-            [clojure.java.io :as io])
-  (:import java.security.KeyPair
-           java.security.Security
+  (:require [cheshire.core :refer [parse-stream]]
+            [clojure.java.io :as io]
+            [clojure.walk :refer [postwalk]])
+  (:import java.security.Security
            java.util.Base64
+           org.bouncycastle.cms.CMSProcessableByteArray
+           org.bouncycastle.cms.CMSEnvelopedDataGenerator
            org.bouncycastle.cms.CMSEnvelopedData
+           org.bouncycastle.cms.CMSAlgorithm
+           org.bouncycastle.cms.jcajce.JceKeyTransRecipientInfoGenerator
+           org.bouncycastle.cms.jcajce.JceCMSContentEncryptorBuilder
            org.bouncycastle.cms.jcajce.JceKeyTransEnvelopedRecipient
+           org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
            org.bouncycastle.openssl.PEMParser
            org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter
            org.bouncycastle.jce.provider.BouncyCastleProvider))
 
 (Security/addProvider (BouncyCastleProvider.))
 
-(def ^:private encryption-regex #"(?m)^ENC\[(.*)\]\n*$")
-
 (defn- encrypted-value [v]
   "grabs the encrypted payload from v"
-  (second (re-find encryption-regex v)))
+  (second (re-find #"(?m)^ENC\[(.*)\]\n*$" v)))
 
 (defn- to-keypair [pem-keypair]
   "converts an openssl keypair into a jcajce"
@@ -25,7 +29,7 @@
    (.setProvider "BC")
    (.getKeyPair pem-keypair)))
 
-(defn- string->envelope [^String s]
+(defn- string->envelope [s]
   "base64 decodes s and constructs a CMSEnvelopedData around it"
   (->
    (Base64/getDecoder)
@@ -36,8 +40,7 @@
   "decrypt s with env-recipient"
   (->
    (string->envelope s)
-   (.getRecipientInfos)
-   (.getRecipients)
+   (.. (getRecipientInfos) (getRecipients))
    (first)
    (.getContent env-recipient)
    (String.)))
@@ -65,23 +68,23 @@
         f (fn [[k v]] (if (string? v)
                         [k (decrypt-or-pass r v)]
                         [k v]))]
-    (clojure.walk/postwalk (fn [x] (if (map? x) (into {} (map f x)) x)) m)))
+    (postwalk (fn [x] (if (map? x) (into {} (map f x)) x)) m)))
 
 (defn decrypt-file [ejson-file & rest]
   "Decrypts with an implicit open and read"
   (with-open [s (io/reader ejson-file)]
-    (apply decrypt (json/parse-stream s) rest)))
+    (apply decrypt (parse-stream s) rest)))
 
 (defn- encrypt-recipient [pem]
   ; lol java ><
-  (let [cert (.getCertificate (.setProvider (org.bouncycastle.cert.jcajce.JcaX509CertificateConverter.) "BC") pem)]
-    (.setProvider (org.bouncycastle.cms.jcajce.JceKeyTransRecipientInfoGenerator. cert) "BC")))
+  (let [cert (.getCertificate (.setProvider (JcaX509CertificateConverter.) "BC") pem)]
+    (.setProvider (JceKeyTransRecipientInfoGenerator. cert) "BC")))
 
 (defn- encrypt-value [r v]
-  (let [data (org.bouncycastle.cms.CMSProcessableByteArray. (.getBytes v))
-        ed-gen (org.bouncycastle.cms.CMSEnvelopedDataGenerator.)]
+  (let [data (CMSProcessableByteArray. (.getBytes v))
+        ed-gen (CMSEnvelopedDataGenerator.)]
     (.addRecipientInfoGenerator ed-gen r)
-    (.encodeToString (java.util.Base64/getEncoder ) (.getEncoded (.generate ed-gen data (.build (.setProvider (org.bouncycastle.cms.jcajce.JceCMSContentEncryptorBuilder. org.bouncycastle.cms.CMSAlgorithm/AES256_CBC) "BC"))))))
+    (.encodeToString (Base64/getEncoder) (.getEncoded (.generate ed-gen data (.build (.setProvider (JceCMSContentEncryptorBuilder. CMSAlgorithm/AES256_CBC) "BC"))))))
   )
 
 (defn encrypt [m &{:keys [public-key]}]
@@ -89,4 +92,4 @@
         f (fn [[k v]] (if (and (string? v) (not (.startsWith k "_")) (nil? (encrypted-value v)) )
                         [k (str "ENC[" (encrypt-value r v) "]")]
                         [k v]))]
-    (clojure.walk/postwalk (fn [x] (if (map? x) (into {} (map f x)) x)) m)))
+    (postwalk (fn [x] (if (map? x) (into {} (map f x)) x)) m)))
