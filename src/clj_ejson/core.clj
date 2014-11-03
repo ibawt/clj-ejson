@@ -76,16 +76,20 @@
     (apply decrypt (parse-stream s) rest)))
 
 (defn- encrypt-recipient [pem]
-  ; lol java ><
   (let [cert (.getCertificate (.setProvider (JcaX509CertificateConverter.) "BC") pem)]
     (.setProvider (JceKeyTransRecipientInfoGenerator. cert) "BC")))
+
+(def ^:private encryptor
+  (->
+   (JceCMSContentEncryptorBuilder. CMSAlgorithm/AES256_CBC)
+   (.setProvider "BC")
+   (.build)))
 
 (defn- encrypt-value [r v]
   (let [data (CMSProcessableByteArray. (.getBytes v))
         ed-gen (CMSEnvelopedDataGenerator.)]
     (.addRecipientInfoGenerator ed-gen r)
-    (.encodeToString (Base64/getEncoder) (.getEncoded (.generate ed-gen data (.build (.setProvider (JceCMSContentEncryptorBuilder. CMSAlgorithm/AES256_CBC) "BC"))))))
-  )
+    (.encodeToString (Base64/getEncoder) (.getEncoded (.generate ed-gen data encryptor)))))
 
 (defn encrypt [m &{:keys [public-key]}]
   (let [r (encrypt-recipient (load-pem public-key))
